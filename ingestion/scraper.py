@@ -4,7 +4,7 @@ Turath.io Book Scraper
 A class-based scraper for extracting book content, metadata, and related information
 from turath.io with robust error handling and retry logic.
 """
-from playwright.sync_api import sync_playwright, Page, Browser, Response, WebError
+from playwright.sync_api import sync_playwright, Page, Browser, Response, WebError, Playwright
 from pathlib import Path
 from typing import Optional, Dict, List, Any
 import json
@@ -48,6 +48,7 @@ class TurathScraper:
         """
         self.headless = headless
         self.base_output_dir = Path(__file__).parent.parent / 'data' / base_output_dir
+        self.playwright: Optional[Playwright] = None
         self.browser: Optional[Browser] = None
         self.page: Optional[Page] = None
         self._author_data: Dict[str, Any] = {}
@@ -99,8 +100,8 @@ class TurathScraper:
     def start_browser(self):
         """Start the browser and create a new page."""
         if self.browser is None:
-            playwright = sync_playwright().start()
-            self.browser = playwright.chromium.launch(headless=self.headless)
+            self.playwright = sync_playwright().start()
+            self.browser = self.playwright.chromium.launch(headless=self.headless)
             self.page = self.browser.new_page()
             logger.debug("Browser started")
 
@@ -111,6 +112,74 @@ class TurathScraper:
             self.browser = None
             self.page = None
             logger.debug("Browser closed")
+        
+        if self.playwright:
+            self.playwright.stop()
+            self.playwright = None
+            logger.debug("Playwright stopped")
+
+    @staticmethod
+    def _extract_title_and_author(page: Page) -> tuple[str, str]:
+        """
+        Extract book title and author from page.
+
+        Args:
+            page: Playwright page object
+
+        Returns:
+            Tuple of (title, author)
+        """
+        title_button = page.query_selector('h3.flex.text-\\[1\\.1rem\\].svelte-twub32 button')
+        author_button = page.query_selector('h3.flex.text-\\[1\\.1rem\\].svelte-twub32 button:nth-of-type(2)')
+
+        # Fallback: get all buttons and access by index
+        if not title_button or not author_button:
+            buttons = page.query_selector_all('h3.flex button')
+            title_button = buttons[0] if len(buttons) > 0 else None
+            author_button = buttons[1] if len(buttons) > 1 else None
+
+        title = title_button.inner_text() if title_button else "Title not found"
+        author = author_button.inner_text() if author_button else "Author not found"
+        return title, author
+
+    @staticmethod
+    def _extract_category(page: Page) -> str:
+        """
+        Extract book category from page.
+
+        Args:
+            page: Playwright page object
+
+        Returns:
+            Category string
+        """
+        info_element = page.query_selector('.info.svelte-5q2e5v')
+        if not info_element:
+            return "Category not found"
+
+        links = info_element.query_selector_all('a')
+        if len(links) >= 2:
+            return links[1].inner_text()
+        if len(links) == 1:
+            return links[0].inner_text()
+
+        text = info_element.inner_text()
+        parts = [p.strip() for p in text.split('·')]
+        return parts[1] if len(parts) >= 2 else "Category not found"
+
+    @staticmethod
+    def _extract_size(page: Page) -> str:
+        """
+        Extract book size from page.
+
+        Args:
+            page: Playwright page object
+
+        Returns:
+            Size string
+        """
+        size_element = page.query_selector('.size.svelte-5q2e5v')
+        return size_element.inner_text() if size_element else "Size not found"
 
     def extract_book_metadata(self, page: Page) -> Dict[str, str]:
         """
@@ -124,37 +193,9 @@ class TurathScraper:
         """
 
         def _extract():
-            # Extract title and author
-            title_button = page.query_selector('h3.flex.text-\\[1\\.1rem\\].svelte-twub32 button')
-            author_button = page.query_selector('h3.flex.text-\\[1\\.1rem\\].svelte-twub32 button:nth-of-type(2)')
-
-            # Fallback: get all buttons and access by index
-            if not title_button or not author_button:
-                buttons = page.query_selector_all('h3.flex button')
-                title_button = buttons[0] if len(buttons) > 0 else None
-                author_button = buttons[1] if len(buttons) > 1 else None
-
-            title = title_button.inner_text() if title_button else "Title not found"
-            author = author_button.inner_text() if author_button else "Author not found"
-
-            # Extract category
-            info_element = page.query_selector('.info.svelte-5q2e5v')
-            category = "Category not found"
-            if info_element:
-                links = info_element.query_selector_all('a')
-                if len(links) >= 2:
-                    category = links[1].inner_text()
-                elif len(links) == 1:
-                    category = links[0].inner_text()
-                else:
-                    text = info_element.inner_text()
-                    parts = [p.strip() for p in text.split('·')]
-                    if len(parts) >= 2:
-                        category = parts[1]
-
-            # Extract size
-            size_element = page.query_selector('.size.svelte-5q2e5v')
-            size = size_element.inner_text() if size_element else "Size not found"
+            title, author = self._extract_title_and_author(page)
+            category = self._extract_category(page)
+            size = self._extract_size(page)
 
             return {
                 "title": title,
@@ -370,9 +411,12 @@ class TurathScraper:
             logger.warning(error_msg)
             return None, error_msg
 
-    def _load_all_pages(self, page: Page, max_scrolls: int = 200) -> tuple[int, Optional[str]]:
+    def _load_all_pages(self, page: Page, max_scrolls: int = 500) -> tuple[int, Optional[str]]:
         """
         Scroll through the viewport to load all pages.
+
+        Uses a robust scrolling strategy with proper waits for lazy-loaded content.
+        Stops when scroll height stabilizes (no new content loaded).
 
         Args:
             page: Playwright page object
@@ -380,39 +424,52 @@ class TurathScraper:
 
         Returns:
             Tuple of (scroll_count, error_message or None)
-
-        Raises:
-            Exception: If viewport not found
         """
         logger.info("Waiting for viewport to load...")
         page.wait_for_selector('div.viewport.svelte-12k9sog', timeout=self.SCROLL_TIMEOUT)
 
         viewport = page.query_selector('div.viewport.svelte-12k9sog')
         if not viewport:
-            raise Exception("Viewport not found")
+            return 0, "Viewport not found"
 
         logger.info("Scrolling to load all pages...")
-        last_height = page.evaluate("(viewport) => viewport.scrollHeight", viewport)
         scroll_count = 0
+        prev_scroll_height = 0
+        stable_count = 0
+        min_stable_checks = 5  # Require 5 consecutive stable heights to confirm end
 
         while scroll_count < max_scrolls:
+            # Scroll to bottom
             page.evaluate("(viewport) => viewport.scrollTo(0, viewport.scrollHeight)", viewport)
-            page.wait_for_timeout(500)
 
-            new_height = page.evaluate("(viewport) => viewport.scrollHeight", viewport)
+            # Wait for lazy-loaded content
+            try:
+                page.wait_for_load_state("networkidle", timeout=3000)
+            except Exception:
+                pass
+            page.wait_for_timeout(800)
 
-            if new_height == last_height:
-                logger.info(f"Reached bottom after {scroll_count} scrolls")
-                break
+            # Get current scroll height
+            current_scroll_height = page.evaluate("(viewport) => viewport.scrollHeight", viewport)
 
-            last_height = new_height
+            # Check if height has stabilized
+            if current_scroll_height == prev_scroll_height:
+                stable_count += 1
+                if stable_count >= min_stable_checks:
+                    logger.info(f"Content fully loaded at height {current_scroll_height} after {scroll_count} scrolls")
+                    break
+            else:
+                stable_count = 0
+                prev_scroll_height = current_scroll_height
+
             scroll_count += 1
 
             if scroll_count % 20 == 0:
-                logger.debug(f"Scroll progress: {scroll_count} scrolls")
+                logger.info(f"Scroll progress: {scroll_count} scrolls, height: {current_scroll_height}")
 
         if scroll_count >= max_scrolls:
             logger.warning(f"Reached max scrolls limit ({max_scrolls})")
+            return scroll_count, f"Reached max scrolls limit ({max_scrolls})"
 
         return scroll_count, None
 
@@ -470,7 +527,7 @@ class TurathScraper:
             url: str,
             book_ref: Optional[str] = None,
             max_pages: Optional[int] = None,
-            max_scrolls: int = 200
+            max_scrolls: int = 500
     ) -> Dict[str, Any] | None:
         """
         Scrape complete book content including metadata, pages, TOC, and author info.
@@ -541,6 +598,10 @@ class TurathScraper:
             scroll_count, scroll_error = self._load_all_pages(page, max_scrolls)
             if scroll_error:
                 stats["errors"].append(scroll_error)
+            else:
+                logger.info(f"Scrolling completed after {scroll_count} scrolls, waiting for final content to render...")
+                # Final wait to ensure all lazy-loaded content is fully rendered
+                page.wait_for_timeout(2000)
 
             # Extract and save page content (critical - will raise on failure)
             pages_saved, pages_error = self._extract_and_save_pages(page, book_dir, max_pages)
@@ -578,7 +639,7 @@ class TurathScraper:
         logger.warning("extract_book_content is deprecated, use extract_book_data instead")
         return self.extract_book_data(url, book_ref, max_pages, max_scrolls)
 
-    def scrape_categories_page(self, url: str = "https://app.turath.io") -> List[Dict[str, str]] | None:
+    def scrape_categories_page(self, url: str = "https://app.turath.io") -> Optional[List[Dict[str, str]]]:
         """
         Scrape categories from the landing page.
 
@@ -586,9 +647,8 @@ class TurathScraper:
             url: URL to scrape categories from
 
         Returns:
-            List of category dictionaries
+            List of category dictionaries, or None on error
         """
-        categories: List[Dict[str, str]] = []
         try:
             self.start_browser()
             page = self.page
@@ -599,20 +659,19 @@ class TurathScraper:
 
             categories = self.extract_categories(page)
             logger.info(f"Extracted {len(categories)} categories")
+            return categories
 
         except Exception as e:
             logger.error(f"Error scraping categories: {e}")
-            return categories
+            return None
 
         finally:
             self.close_browser()
 
-        return categories
-
 
 def main():
     """Main entry point for the scraper."""
-    url = "https://app.turath.io/book/6465"
+    url = "https://app.turath.io/book/6388"
 
     scraper = TurathScraper(headless=False)
 
