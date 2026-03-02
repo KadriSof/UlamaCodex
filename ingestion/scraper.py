@@ -52,16 +52,32 @@ class TurathScraper:
     ELEMENT_WAIT_TIMEOUT = 30000  # 30 seconds for element wait
     SCROLL_TIMEOUT = 600000  # 10 minutes for scrolling (large books)
 
-    def __init__(self, headless: bool = False, base_output_dir: str = 'raw'):
+    def __init__(
+        self,
+        headless: bool = False,
+        base_output_dir: str = 'raw',
+        output_dir: Optional[Path | str] = None
+    ):
         """
         Initialize the scraper.
 
         Args:
             headless: Run browser in headless mode
-            base_output_dir: Base directory for storing scraped content
+            base_output_dir: Subdirectory name for storing scraped content (default: 'raw')
+            output_dir: Base output directory for scraped data. If None, defaults to
+                        Path.cwd() / 'data' / base_output_dir. This ensures output is
+                        written outside the package tree, making it safe for installed
+                        or read-only environments.
         """
         self.headless = headless
-        self.base_output_dir = Path(__file__).parent.parent / 'data' / base_output_dir
+
+        # Resolve output directory safely - default to cwd/data/ to avoid writing
+        # inside the package tree which could break in installed/read-only environments
+        if output_dir is not None:
+            self.base_output_dir = Path(output_dir)
+        else:
+            self.base_output_dir = Path.cwd() / 'data' / base_output_dir
+
         self.playwright: Optional[Playwright] = None
         self.browser: Optional[Browser] = None
         self.page: Optional[Page] = None
