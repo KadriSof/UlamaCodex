@@ -12,13 +12,27 @@ import logging
 import time
 from datetime import datetime
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
-)
+# Logger for this module (configuration should be done by the application)
 logger = logging.getLogger(__name__)
+
+
+def configure_logging(
+    level: int = logging.INFO,
+    format: str = '%(asctime)s - %(levelname)s - %(message)s',
+    datefmt: str = '%Y-%m-%d %H:%M:%S'
+) -> None:
+    """
+    Configure logging for the scraper.
+
+    This function should be called by the application to set up logging.
+    It is not called automatically to avoid overriding the application's logging config.
+
+    Args:
+        level: Logging level (e.g., logging.INFO, logging.DEBUG)
+        format: Log message format
+        datefmt: Date format for log messages
+    """
+    logging.basicConfig(level=level, format=format, datefmt=datefmt)
 
 
 class TurathScraper:
@@ -799,6 +813,9 @@ class TurathScraper:
 
 def main():
     """Main entry point for the scraper."""
+    # Configure logging for standalone execution
+    configure_logging()
+
     url = "https://app.turath.io/book/6388"
 
     scraper = TurathScraper(headless=False)
