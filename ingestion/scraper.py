@@ -17,9 +17,9 @@ logger = logging.getLogger(__name__)
 
 
 def configure_logging(
-    level: int = logging.INFO,
-    format: str = '%(asctime)s - %(levelname)s - %(message)s',
-    datefmt: str = '%Y-%m-%d %H:%M:%S'
+    log_level: int = logging.INFO,
+    log_format: str = '%(asctime)s - %(levelname)s - %(message)s',
+    log_datefmt: str = '%Y-%m-%d %H:%M:%S'
 ) -> None:
     """
     Configure logging for the scraper.
@@ -28,11 +28,11 @@ def configure_logging(
     It is not called automatically to avoid overriding the application's logging config.
 
     Args:
-        level: Logging level (e.g., logging.INFO, logging.DEBUG)
-        format: Log message format
-        datefmt: Date format for log messages
+        log_level: Logging level (e.g., logging.INFO, logging.DEBUG)
+        log_format: Log message format
+        log_datefmt: Date format for log messages
     """
-    logging.basicConfig(level=level, format=format, datefmt=datefmt)
+    logging.basicConfig(level=log_level, format=log_format, datefmt=log_datefmt)
 
 
 class TurathScraper:
@@ -825,39 +825,3 @@ class TurathScraper:
 
         finally:
             self.close_browser()
-
-
-def main():
-    """Main entry point for the scraper."""
-    # Configure logging for standalone execution
-    configure_logging()
-
-    url = "https://app.turath.io/book/6388"
-
-    scraper = TurathScraper(headless=False)
-
-    try:
-        stats = scraper.extract_book_data(
-            url=url,
-            max_pages=None,  # Extract all pages
-            max_scrolls=200
-        )
-
-        logger.info("\n=== Extraction Summary ===")
-        logger.info(f"Book Reference: {stats['book_ref']}")
-        logger.info(f"Pages Extracted: {stats['pages_extracted']}")
-        logger.info(f"TOC Items: {stats['toc_items']}")
-        logger.info(f"Duration: {stats['duration_seconds']:.2f} seconds")
-
-        if stats['errors']:
-            logger.warning(f"Errors encountered: {len(stats['errors'])}")
-            for error in stats['errors']:
-                logger.warning(f"  - {error}")
-
-    except Exception as e:
-        logger.error(f"Extraction failed: {e}")
-        raise
-
-
-if __name__ == '__main__':
-    main()
