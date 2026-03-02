@@ -4,7 +4,7 @@ Turath.io Book Scraper
 A class-based scraper for extracting book content, metadata, and related information
 from turath.io with robust error handling and retry logic.
 """
-from playwright.sync_api import sync_playwright, Page, Browser, Response, WebError, Playwright
+from playwright.sync_api import sync_playwright, Page, Browser, Response, Playwright
 from pathlib import Path
 from typing import Optional, Dict, List, Any
 import json
@@ -266,29 +266,51 @@ class TurathScraper:
 
         return self._retry_operation(_extract)
 
+    @staticmethod
+    def _is_author_response(response: Response) -> bool:
+        """
+        Check if a response is from the author panel endpoint.
+
+        Args:
+            response: Playwright response object
+
+        Returns:
+            True if this is an author panel response with status 200
+        """
+        return "author" in response.url and response.status == 200
+
+    @staticmethod
+    def _parse_author_response(response: Response) -> Dict[str, Any]:
+        """
+        Parse author data from a response.
+
+        Args:
+            response: Playwright response object
+
+        Returns:
+            Parsed author data dictionary
+        """
+        try:
+            return response.json()
+        except json.JSONDecodeError:
+            return {"raw_content": response.text()}
+
     def extract_author_panel_content(self, page: Page) -> Dict[str, Any]:
         """
         Extract author information by intercepting network requests.
+
+        Uses page.wait_for_response() with a specific predicate to reliably
+        capture the author panel API response, with proper timeout handling.
 
         Args:
             page: Playwright page object
 
         Returns:
             Dictionary containing author information
+
+        Raises:
+            TimeoutError: If author response is not received within timeout
         """
-        self._author_data = {}
-
-        def handle_response(response: Response):
-            if "author" in response.url and response.status == 200:
-                try:
-                    self._author_data = response.json()
-                    logger.debug("Author panel response captured")
-
-                except WebError:
-                    self._author_data = {"raw_content": response.text()}
-
-        page.on("response", handle_response)
-
         def _extract():
             # Find and click author button
             buttons = page.query_selector_all('h3.flex.text-\\[1\\.1rem\\].svelte-twub32 button')
@@ -299,11 +321,22 @@ class TurathScraper:
                     author_button = button
                     break
 
-            if author_button:
-                author_button.click()
-                page.wait_for_timeout(3000)  # Wait for network request
+            if not author_button:
+                logger.warning("Author button not found")
+                return {}
 
-            return self._author_data
+            # Click author button and wait for specific response
+            author_button.click()
+
+            # Wait for author panel response with timeout
+            # Use predicate function to match only author endpoint responses
+            response = page.wait_for_response(
+                lambda r: self._is_author_response(r),
+                timeout=self.ELEMENT_WAIT_TIMEOUT
+            )  # type: ignore[attr-defined]
+
+            logger.debug("Author panel response captured")
+            return self._parse_author_response(response)
 
         return self._retry_operation(_extract)
 
@@ -446,8 +479,8 @@ class TurathScraper:
             try:
                 page.wait_for_load_state("networkidle", timeout=3000)
 
-            except Exception:
-                pass
+            except TimeoutError:
+                pass  # Continue scrolling even if networkidle timeout is reached
 
             page.wait_for_timeout(800)
 
