@@ -445,8 +445,10 @@ class TurathScraper:
             # Wait for lazy-loaded content
             try:
                 page.wait_for_load_state("networkidle", timeout=3000)
+
             except Exception:
                 pass
+
             page.wait_for_timeout(800)
 
             # Get current scroll height
@@ -474,7 +476,90 @@ class TurathScraper:
         return scroll_count, None
 
     @staticmethod
-    def _extract_and_save_pages(page: Page, book_dir: Path, max_pages: Optional[int] = None) -> tuple[
+    def _sanitize_page_id(page_id: Optional[str]) -> str:
+        """
+        Sanitize a page ID to make it safe for use in filenames.
+
+        Removes or replaces characters that are invalid or problematic in filenames.
+
+        Args:
+            page_id: Raw page ID from DOM element
+
+        Returns:
+            Sanitized ID safe for filenames, or empty string if input is None/empty
+        """
+        if not page_id:
+            return ""
+
+        # Replace unsafe characters with underscores
+        # Windows: < > : " / \ | ? *
+        # Unix: / (and null byte)
+        sanitized = page_id
+        unsafe_chars = ['<', '>', ':', '"', '/', '\\', '|', '?', '*', '\x00']
+        for char in unsafe_chars:
+            sanitized = sanitized.replace(char, '_')
+
+        # Strip leading/trailing whitespace and dots (problematic on Windows)
+        sanitized = sanitized.strip().strip('.')
+
+        # Limit length to avoid filesystem path limits
+        max_id_length = 100
+        if len(sanitized) > max_id_length:
+            sanitized = sanitized[:max_id_length]
+
+        return sanitized
+
+    def _generate_page_filename(self, page_id: Optional[str], page_index: int,
+                                 used_filenames: set[str]) -> str:
+        """
+        Generate a unique, safe filename for a page.
+
+        Handles missing IDs, duplicate IDs, and unsafe characters by:
+        1. Sanitizing the ID
+        2. Using page index as fallback for missing/empty IDs
+        3. Adding numeric suffix for duplicates
+
+        Args:
+            page_id: Raw page ID from DOM element
+            page_index: Zero-based index of the page (for fallback)
+            used_filenames: Set of already-used filenames to avoid collisions
+
+        Returns:
+            Unique filename (without extension)
+        """
+        sanitized_id = self._sanitize_page_id(page_id)
+
+        # Fallback for missing or empty ID
+        if not sanitized_id:
+            base_name = f"page_{page_index:04d}"
+        else:
+            base_name = f"page_{sanitized_id}"
+
+        # Handle duplicates by adding numeric suffix
+        filename = base_name
+        suffix = 1
+        while filename in used_filenames:
+            filename = f"{base_name}_dup{suffix}"
+            suffix += 1
+
+        return filename
+
+    @staticmethod
+    def _save_page_content(content: str, file_path: Path) -> None:
+        """
+        Save page content to a file.
+
+        Args:
+            content: Page text content
+            file_path: Full path to the output file
+
+        Raises:
+            Exception: If saving fails
+        """
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+
+    def _extract_and_save_pages(self, page: Page, book_dir: Path, max_pages: Optional[int] = None) -> tuple[
         int, Optional[str]]:
         """
         Extract and save page content.
@@ -492,6 +577,8 @@ class TurathScraper:
         logger.info(f"Found {len(pages)} pages")
 
         pages_saved = 0
+        used_filenames: set[str] = set()
+
         for idx, page_div in enumerate(pages):
             if max_pages and idx >= max_pages:
                 logger.info(f"Reached max pages limit ({max_pages})")
@@ -500,13 +587,21 @@ class TurathScraper:
             page_id = page_div.get_attribute('id')
             content = page_div.inner_text()
 
-            page_file = book_dir / f"book_page_{page_id}.txt"
-            with open(page_file, 'w', encoding='utf-8') as f:
-                f.write(content)
+            # Generate safe, unique filename
+            safe_filename = self._generate_page_filename(page_id, idx, used_filenames)
+            used_filenames.add(safe_filename)
 
-            pages_saved += 1
-            if pages_saved % 50 == 0:
-                logger.debug(f"Saved {pages_saved} pages...")
+            page_file = book_dir / f"book_{safe_filename}.txt"
+
+            try:
+                self._save_page_content(content, page_file)
+                pages_saved += 1
+
+                if pages_saved % 50 == 0:
+                    logger.debug(f"Saved {pages_saved} pages...")
+
+            except Exception as e:
+                logger.warning(f"Failed to save page {idx} to {page_file}: {e}")
 
         logger.info(f"Saved {pages_saved} pages to {book_dir}")
         return pages_saved, None
