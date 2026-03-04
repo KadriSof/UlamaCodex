@@ -3,6 +3,7 @@ Repository implementations for persisting and querying scraped book data.
 
 Repositories provide CRUD operations and specialized query methods for each model.
 """
+import re
 from datetime import datetime
 from typing import TypeVar
 
@@ -35,6 +36,19 @@ def _safe_object_id(id_str: str) -> ObjectId | None:
         return ObjectId(id_str)
     except (InvalidId, ValueError, TypeError):
         return None
+
+
+def _escape_regex(pattern: str) -> str:
+    """
+    Escape special regex characters in user-provided strings.
+
+    Args:
+        pattern: User-provided search pattern
+
+    Returns:
+        Escaped pattern safe for regex interpolation
+    """
+    return re.escape(pattern)
 
 
 class AuthorRepository(BaseRepository[Author]):
@@ -72,8 +86,9 @@ class AuthorRepository(BaseRepository[Author]):
 
     async def search_by_name(self, name_pattern: str) -> list[Author]:
         """Search authors by name pattern (case-insensitive regex)."""
+        escaped_pattern = _escape_regex(name_pattern)
         return await self.engine.find(
-            Author, Author.name.match(f"(?i){name_pattern}")
+            Author, Author.name.match(f"(?i){escaped_pattern}")
         )
 
 
@@ -122,8 +137,9 @@ class BookMetadataRepository(BaseRepository[BookMetadata]):
 
     async def search_by_title(self, title_pattern: str) -> list[BookMetadata]:
         """Search books by title pattern (case-insensitive regex)."""
+        escaped_pattern = _escape_regex(title_pattern)
         return await self.engine.find(
-            BookMetadata, BookMetadata.title.match(f"(?i){title_pattern}")
+            BookMetadata, BookMetadata.title.match(f"(?i){escaped_pattern}")
         )
 
     async def get_by_date_range(
@@ -183,10 +199,11 @@ class BookPageRepository(BaseRepository[BookPage]):
         self, book_ref: str, search_term: str
     ) -> list[BookPage]:
         """Search page content within a book (case-insensitive regex)."""
+        escaped_term = _escape_regex(search_term)
         return await self.engine.find(
             BookPage,
             (BookPage.book_ref == book_ref)
-            & BookPage.content.match(f"(?i){search_term}"),
+            & BookPage.content.match(f"(?i){escaped_term}"),
         )
 
     async def count_pages_for_book(self, book_ref: str) -> int:
