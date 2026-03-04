@@ -207,18 +207,21 @@ class BookPageRepository(BaseRepository[BookPage]):
         )
 
     async def count_pages_for_book(self, book_ref: str) -> int:
-        """Count the number of pages for a specific book."""
-        pages = await self.get_by_book_ref(book_ref)
-        return len(pages)
+        """Count the number of pages for a specific book.
+        
+        Uses database-level count operation for efficiency.
+        """
+        collection = self.engine.get_collection(BookPage)
+        return await collection.count_documents({"book_ref": book_ref})
 
     async def delete_all_for_book(self, book_ref: str) -> int:
-        """Delete all pages for a specific book. Returns count of deleted pages."""
-        pages = await self.get_by_book_ref(book_ref)
-        deleted_count = 0
-        for page in pages:
-            await self.engine.delete(page)
-            deleted_count += 1
-        return deleted_count
+        """Delete all pages for a specific book. Returns count of deleted pages.
+        
+        Uses database-level delete_many operation for efficiency.
+        """
+        collection = self.engine.get_collection(BookPage)
+        result = await collection.delete_many({"book_ref": book_ref})
+        return result.deleted_count
 
 
 class TableOfContentsRepository(BaseRepository[TableOfContents]):
@@ -316,9 +319,11 @@ class ExtractionStatsRepository(BaseRepository[ExtractionStats]):
         )
 
     async def get_failed_extractions(self) -> list[ExtractionStats]:
-        """Retrieve all extraction stats that have errors."""
-        all_stats = await self.list_all(limit=1000)
-        return [stats for stats in all_stats if stats.errors]
+        """Retrieve all extraction stats that have errors.
+        
+        Uses database-level query to filter by non-empty errors array.
+        """
+        return await self.engine.find(ExtractionStats, ExtractionStats.errors != [])
 
     async def get_by_date_range(
         self, start_date: datetime, end_date: datetime
@@ -331,9 +336,14 @@ class ExtractionStatsRepository(BaseRepository[ExtractionStats]):
         )
 
     async def get_average_duration(self) -> float | None:
-        """Calculate average extraction duration across all stats."""
-        all_stats = await self.list_all(limit=1000)
-        if not all_stats:
-            return None
-        durations = [s.duration_seconds for s in all_stats if s.duration_seconds]
-        return sum(durations) / len(durations) if durations else None
+        """Calculate average extraction duration across all stats.
+        
+        Uses MongoDB aggregation pipeline for efficient computation.
+        """
+        collection = self.engine.get_collection(ExtractionStats)
+        pipeline = [
+            {"$match": {"duration_seconds": {"$ne": None, "$exists": True}}},
+            {"$group": {"_id": None, "avg_duration": {"$avg": "$duration_seconds"}}}
+        ]
+        result = await collection.aggregate(pipeline).to_list(length=1)
+        return result[0]["avg_duration"] if result else None
