@@ -15,7 +15,6 @@ from tenacity import (
 from persistence.base import BaseClient
 from persistence.mongodb.settings import Settings
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 DB_NOT_CONNECTED_ERROR = "Database not connected. Call connect() first."
