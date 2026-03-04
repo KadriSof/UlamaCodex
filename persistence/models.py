@@ -10,7 +10,7 @@ must directly inherit from `Model` instead of using a custom BaseModel.
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, ClassVar
 
-from odmantic import Field, Index, Model
+from odmantic import EmbeddedModel, Field, Index, Model
 
 if TYPE_CHECKING:
     from odmantic import ObjectId as ObjectIdType
@@ -58,11 +58,8 @@ class BookPage(Model):
     }
 
 
-class TocEntry(Model):
+class TocEntry(EmbeddedModel):
     """Single table of contents entry."""
-    if TYPE_CHECKING:
-        id: "ObjectIdType"
-
     heading_loc: str
     heading_text: str
 
