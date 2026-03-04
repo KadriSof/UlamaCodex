@@ -260,22 +260,19 @@ async def close_db_connection() -> None:
     await get_db_manager().disconnect()
 
 
-# Expose properties for backward compatibility
-@property
+# Expose async functions for backward compatibility
 async def client() -> AsyncIOMotorClient | None:
     """Get the global client (backward compatibility)."""
     db_manager = get_db_manager()
     return db_manager.client if db_manager.is_connected else None
 
 
-@property
 async def db() -> AsyncIOMotorDatabase | None:
     """Get the global database (backward compatibility)."""
     db_manager = get_db_manager()
     return db_manager.db if db_manager.is_connected else None
 
 
-@property
 async def engine() -> AIOEngine | None:
     """Get the global engine (backward compatibility)."""
     db_manager = get_db_manager()
