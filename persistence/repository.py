@@ -182,9 +182,23 @@ class BookPageRepository(BaseRepository[BookPage]):
             return True
         return False
 
-    async def get_by_book_ref(self, book_ref: str) -> list[BookPage]:
-        """Retrieve all pages for a specific book."""
-        return await self.engine.find(BookPage, BookPage.book_ref == book_ref)
+    async def get_by_book_ref(self, book_ref: str, skip: int = 0, limit: int = 100) -> list[BookPage]:
+        """Retrieve all pages for a specific book with pagination.
+        
+        Args:
+            book_ref: Book reference identifier
+            skip: Number of pages to skip (for pagination)
+            limit: Maximum number of pages to return
+            
+        Returns:
+            List of pages for the specified book
+        """
+        return await self.engine.find(
+            BookPage, 
+            BookPage.book_ref == book_ref,
+            skip=skip,
+            limit=limit
+        )
 
     async def get_page_by_id(
         self, book_ref: str, page_id: str
@@ -196,14 +210,26 @@ class BookPageRepository(BaseRepository[BookPage]):
         )
 
     async def search_content(
-        self, book_ref: str, search_term: str
+        self, book_ref: str, search_term: str, skip: int = 0, limit: int = 100
     ) -> list[BookPage]:
-        """Search page content within a book (case-insensitive regex)."""
+        """Search page content within a book (case-insensitive regex).
+        
+        Args:
+            book_ref: Book reference identifier
+            search_term: Search pattern (escaped for safe regex use)
+            skip: Number of results to skip (for pagination)
+            limit: Maximum number of results to return
+            
+        Returns:
+            List of matching pages
+        """
         escaped_term = _escape_regex(search_term)
         return await self.engine.find(
             BookPage,
             (BookPage.book_ref == book_ref)
             & BookPage.content.match(f"(?i){escaped_term}"),
+            skip=skip,
+            limit=limit,
         )
 
     async def count_pages_for_book(self, book_ref: str) -> int:

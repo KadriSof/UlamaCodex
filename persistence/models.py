@@ -52,7 +52,8 @@ class BookPage(Model):
 
     model_config: ClassVar[dict] = {
         "indexes": lambda: [
-            Index(BookPage.book_ref, BookPage.page_id, unique=True)
+            Index(BookPage.book_ref, BookPage.page_id, unique=True),
+            Index(BookPage.book_ref),  # For efficient book-level queries
         ]
     }
 
