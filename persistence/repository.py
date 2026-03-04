@@ -4,7 +4,9 @@ Repository implementations for persisting and querying scraped book data.
 Repositories provide CRUD operations and specialized query methods for each model.
 """
 from datetime import datetime
+from typing import TypeVar
 
+from bson.errors import InvalidId
 from odmantic.bson import ObjectId
 
 from persistence.base import BaseClient, BaseRepository
@@ -15,6 +17,24 @@ from persistence.models import (
     ExtractionStats,
     TableOfContents,
 )
+
+T = TypeVar('T')
+
+
+def _safe_object_id(id_str: str) -> ObjectId | None:
+    """
+    Safely convert a string to ObjectId.
+
+    Args:
+        id_str: String representation of ObjectId
+
+    Returns:
+        ObjectId if valid, None if malformed
+    """
+    try:
+        return ObjectId(id_str)
+    except (InvalidId, ValueError, TypeError):
+        return None
 
 
 class AuthorRepository(BaseRepository[Author]):
@@ -29,7 +49,10 @@ class AuthorRepository(BaseRepository[Author]):
 
     async def get_by_id(self, author_id: str) -> Author | None:
         """Retrieve an author by ID."""
-        return await self.engine.find_one(Author, Author.id == ObjectId(author_id))
+        obj_id = _safe_object_id(author_id)
+        if obj_id is None:
+            return None
+        return await self.engine.find_one(Author, Author.id == obj_id)
 
     async def list_all(self, skip: int = 0, limit: int = 100) -> list[Author]:
         """List all authors with pagination."""
@@ -66,7 +89,10 @@ class BookMetadataRepository(BaseRepository[BookMetadata]):
 
     async def get_by_id(self, book_id: str) -> BookMetadata | None:
         """Retrieve a book by ID."""
-        return await self.engine.find_one(BookMetadata, BookMetadata.id == ObjectId(book_id))
+        obj_id = _safe_object_id(book_id)
+        if obj_id is None:
+            return None
+        return await self.engine.find_one(BookMetadata, BookMetadata.id == obj_id)
 
     async def list_all(self, skip: int = 0, limit: int = 100) -> list[BookMetadata]:
         """List all books with pagination."""
@@ -123,7 +149,10 @@ class BookPageRepository(BaseRepository[BookPage]):
 
     async def get_by_id(self, page_id: str) -> BookPage | None:
         """Retrieve a page by ID."""
-        return await self.engine.find_one(BookPage, BookPage.id == ObjectId(page_id))
+        obj_id = _safe_object_id(page_id)
+        if obj_id is None:
+            return None
+        return await self.engine.find_one(BookPage, BookPage.id == obj_id)
 
     async def list_all(self, skip: int = 0, limit: int = 100) -> list[BookPage]:
         """List all pages with pagination."""
@@ -187,7 +216,10 @@ class TableOfContentsRepository(BaseRepository[TableOfContents]):
 
     async def get_by_id(self, toc_id: str) -> TableOfContents | None:
         """Retrieve TOC by ID."""
-        return await self.engine.find_one(TableOfContents, TableOfContents.id == ObjectId(toc_id))
+        obj_id = _safe_object_id(toc_id)
+        if obj_id is None:
+            return None
+        return await self.engine.find_one(TableOfContents, TableOfContents.id == obj_id)
 
     async def list_all(self, skip: int = 0, limit: int = 100) -> list[TableOfContents]:
         """List all TOCs with pagination."""
@@ -241,8 +273,11 @@ class ExtractionStatsRepository(BaseRepository[ExtractionStats]):
 
     async def get_by_id(self, stats_id: str) -> ExtractionStats | None:
         """Retrieve stats by ID."""
+        obj_id = _safe_object_id(stats_id)
+        if obj_id is None:
+            return None
         return await self.engine.find_one(
-            ExtractionStats, ExtractionStats.id == ObjectId(stats_id)
+            ExtractionStats, ExtractionStats.id == obj_id
         )
 
     async def list_all(self, skip: int = 0, limit: int = 100) -> list[ExtractionStats]:
